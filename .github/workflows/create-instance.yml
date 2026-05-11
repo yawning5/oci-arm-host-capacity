@@ -1,0 +1,75 @@
+name: Create OCI ARM Instance
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  create-instance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+
+      - name: Install dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist
+
+      - name: Write private key
+        run: |
+          mkdir -p $HOME/.oci
+          echo "${{ secrets.OCI_PRIVATE_KEY }}" > $HOME/.oci/key.pem
+          chmod 600 $HOME/.oci/key.pem
+
+      - name: Run create instance script
+        id: create
+        env:
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_USER_ID: ${{ secrets.OCI_USER_ID }}
+          OCI_TENANCY_ID: ${{ secrets.OCI_TENANCY_ID }}
+          OCI_KEY_FINGERPRINT: ${{ secrets.OCI_KEY_FINGERPRINT }}
+          OCI_PRIVATE_KEY_FILENAME: /home/runner/.oci/key.pem
+          OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
+          OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
+          OCI_SHAPE: VM.Standard.A1.Flex
+          OCI_OCPUS: '4'
+          OCI_MEMORY_IN_GBS: '24'
+          OCI_BOOT_VOLUME_SIZE_IN_GBS: '200'
+          OCI_MAX_INSTANCES: '1'
+          OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+          OCI_AVAILABILITY_DOMAIN: ''
+          CACHE_AVAILABILITY_DOMAINS: '1'
+          TOO_MANY_REQUESTS_TIME_WAIT: '600'
+        run: |
+          set +e
+          OUTPUT=$(php index.php 2>&1)
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -qiE "instance.*created|provisioning|success"; then
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+          fi
+          exit 0
+
+      - name: Notify Discord on success
+        if: steps.create.outputs.success == 'true'
+        run: |
+          curl -H "Content-Type: application/json" -X POST \
+            -d '{"content":"✅ OCI ARM instance created! Check OCI console."}' \
+            "${{ secrets.DISCORD_WEBHOOK_URL }}"
+
+      - name: Disable workflow on success
+        if: steps.create.outputs.success == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow disable "Create OCI ARM Instance" --repo ${{ github.repository }}
