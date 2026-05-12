@@ -2,7 +2,7 @@ name: Create OCI ARM Instance
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 jobs:
