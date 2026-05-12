@@ -29,7 +29,6 @@ jobs:
           mkdir -p $HOME/.oci
           echo "${{ secrets.OCI_PRIVATE_KEY }}" > $HOME/.oci/key.pem
           chmod 600 $HOME/.oci/key.pem
-
       - name: Run create instance script
         id: create
         env:
@@ -52,21 +51,25 @@ jobs:
         run: |
           set +e
           OUTPUT=$(php index.php 2>&1)
+          PHP_EXIT=$?
           echo "$OUTPUT"
-          if echo "$OUTPUT" | grep -qiE "instance.*created|provisioning|success"; then
-            echo "success=true" >> $GITHUB_OUTPUT
-          else
-            echo "success=false" >> $GITHUB_OUTPUT
+          echo "PHP exit code: $PHP_EXIT"
+          SUCCESS=false
+          if [ $PHP_EXIT -eq 0 ]; then
+            if echo "$OUTPUT" | grep -qiE 'out of (host )?capacity|toomanyrequests|too many requests|limitexceeded|error|exception|failed|fatal|"success"[[:space:]]*:[[:space:]]*false'; then
+              SUCCESS=false
+            elif echo "$OUTPUT" | grep -qiE 'instance.*(created|provisioning|running)|"lifecycleState"[[:space:]]*:[[:space:]]*"(PROVISIONING|RUNNING|STARTING)"'; then
+              SUCCESS=true
+            fi
           fi
+          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
           exit 0
-
       - name: Notify Discord on success
         if: steps.create.outputs.success == 'true'
         run: |
           curl -H "Content-Type: application/json" -X POST \
             -d '{"content":"✅ OCI ARM instance created! Check OCI console."}' \
             "${{ secrets.DISCORD_WEBHOOK_URL }}"
-
       - name: Disable workflow on success
         if: steps.create.outputs.success == 'true'
         env:
